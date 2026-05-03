@@ -1,22 +1,24 @@
 # keyboard-assault
 
-Низкоуровневый ремаппер клавиатуры для Linux. Работает через `/dev/input` и `uinput`, перехватывает события на уровне ядра — работает в любом окружении (X11, Wayland, TTY).
+Низкоуровневый ремаппер клавиатуры для Linux. Работает через `/dev/input` и `uinput`, перехватывает события на уровне ядра — функционирует в любом окружении (X11, Wayland, TTY).
+
+---
 
 ## Возможности
 
-| Сочетание | Действие |
-|---|---|
-| `Caps + I/J/K/L` | Стрелки ↑ ← ↓ → |
-| `Caps + U` | Home |
-| `Caps + O` | End |
-| `Caps + Backspace` | Удалить слово назад (Ctrl+Backspace) |
-| `Shift + Backspace` | Delete |
-| `Ctrl + F1` | Mute / Unmute |
-| `Ctrl + F2` | Громкость — |
-| `Ctrl + F3` | Громкость + |
-| `Alt + Space` | Super+Space (смена раскладки) |
-| `RightShift` | / ? |
-| `физический /` | ↑ |
+| Сочетание           | Действие                             |
+| ------------------- | ------------------------------------ |
+| `Caps + I/J/K/L`    | Стрелки ↑ ← ↓ →                      |
+| `Caps + U`          | Home                                 |
+| `Caps + O`          | End                                  |
+| `Caps + Backspace`  | Удалить слово назад (Ctrl+Backspace) |
+| `Shift + Backspace` | Delete                               |
+| `Ctrl + F1`         | Mute / Unmute                        |
+| `Ctrl + F2`         | Громкость —                          |
+| `Ctrl + F3`         | Громкость +                          |
+| `Alt + Space`       | Super+Space (смена раскладки)        |
+| `RightShift`        | / ?                                  |
+| `физический /`      | ↑                                    |
 
 Caps Lock используется исключительно как модификатор и не переключает регистр.
 
@@ -28,33 +30,39 @@ Caps Lock используется исключительно как модиф�
 
 ```bash
 # Debian / Ubuntu
-sudo apt install g++ linux-headers-$(uname -r)
+sudo apt install cmake g++ linux-headers-$(uname -r)
 
 # Arch
-sudo pacman -S gcc
+sudo pacman -S cmake gcc
 ```
+
+---
 
 ### Компиляция
 
 ```bash
-g++ -O2 -o keyboard main.cpp
+cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+```
+
+Бинарник будет находиться в:
+
+```bash
+./build/keyboard_assault
 ```
 
 ---
 
 ## Настройка
 
-Откройте `main.cpp` и измените нужные параметры вверху файла:
+Откройте `main.cpp` и измените параметры в начале файла:
 
 ```cpp
-// Секретная последовательность для привязки клавиатуры
 #define SECRET_SEQUENCE "1234"
-
-// Задержка повторения удаления слова (в микросекундах)
 #define DELETE_REPEAT_DELAY_US 150000
 ```
 
-Для изменения навигационных клавиш отредактируйте `NAV_MAP`:
+Для изменения навигации:
 
 ```cpp
 const std::map<int, int> NAV_MAP = {
@@ -67,46 +75,46 @@ const std::map<int, int> NAV_MAP = {
 };
 ```
 
-После изменений — пересоберите:
+После изменений пересоберите проект:
 
 ```bash
-g++ -O2 -o keyboard main.cpp
+cmake --build build
 ```
 
 ---
 
 ## Привязка клавиатуры
 
-Программа не использует фиксированный путь к устройству. Вместо этого при каждом запуске она ждёт ввода секретной последовательности и автоматически определяет нужную клавиатуру.
+Программа не использует фиксированный путь к устройству.
 
 **Как это работает:**
 
-1. Программа слушает все клавиатуры в `/dev/input` одновременно
-2. Введите секретную последовательность (по умолчанию `1234`) на нужной клавиатуре
-3. Программа привязывается к этому устройству
-4. Если клавиатура отключается — программа снова ждёт последовательности
-5. Новые устройства подхватываются автоматически через `inotify`
+1. Слушает все устройства в `/dev/input`
+2. Ожидает ввод секретной последовательности (по умолчанию `1234`)
+3. Привязывается к устройству, на котором она введена
+4. При отключении устройства — возвращается в режим ожидания
+5. Новые устройства отслеживаются через `inotify`
 
-Последовательность вводится системно — не нужно фокусироваться на каком-либо окне или терминале.
+Ввод последовательности не требует фокуса окна.
 
 ---
 
-## Добавление в автозагрузку (systemd)
+## Установка как сервис (systemd)
 
-### 1. Скопируйте бинарник
+### 1. Установка бинарника
 
 ```bash
-sudo cp keyboard /usr/local/bin/keyboard-assault
+sudo cp build/keyboard_assault /usr/local/bin/keyboard-assault
 sudo chmod +x /usr/local/bin/keyboard-assault
 ```
 
-### 2. Создайте systemd-сервис
+---
+
+### 2. Создание сервиса
 
 ```bash
 sudo nano /etc/systemd/system/keyboard-assault.service
 ```
-
-Содержимое файла:
 
 ```ini
 [Unit]
@@ -124,35 +132,31 @@ RestartSec=3
 WantedBy=multi-user.target
 ```
 
-### 3. Включите и запустите сервис
+---
+
+### 3. Запуск
 
 ```bash
-# Перезагрузить конфигурацию systemd
 sudo systemctl daemon-reload
-
-# Включить автозапуск при загрузке
 sudo systemctl enable keyboard-assault
-
-# Запустить сейчас
 sudo systemctl start keyboard-assault
 ```
 
-### 4. Проверьте статус
+---
+
+### 4. Проверка
 
 ```bash
 sudo systemctl status keyboard-assault
 ```
 
-### Управление сервисом
+---
+
+## Управление
 
 ```bash
-# Остановить
 sudo systemctl stop keyboard-assault
-
-# Перезапустить (например после пересборки)
 sudo systemctl restart keyboard-assault
-
-# Посмотреть логи
 sudo journalctl -u keyboard-assault -f
 ```
 
@@ -160,29 +164,35 @@ sudo journalctl -u keyboard-assault -f
 
 ## Устранение неполадок
 
-**Программа не видит клавиатуру**
-
-Убедитесь что запускаете с `sudo` или что пользователь состоит в группе `input`:
+### Нет доступа к клавиатуре
 
 ```bash
 sudo usermod -aG input $USER
-# После этого нужно перелогиниться
 ```
 
-**После пересборки нужно перезапустить сервис**
+(после этого перелогиниться)
+
+---
+
+### Пересборка и обновление
 
 ```bash
-sudo cp keyboard /usr/local/bin/keyboard-assault
+cmake --build build
+sudo cp build/keyboard_assault /usr/local/bin/keyboard-assault
 sudo systemctl restart keyboard-assault
 ```
 
-**Посмотреть какие устройства определяются как клавиатуры**
+---
+
+### Проверка устройств
 
 ```bash
 cat /proc/bus/input/devices | grep -A5 "EV="
 ```
 
-**Проверить коды клавиш**
+---
+
+### Проверка событий клавиш
 
 ```bash
 sudo evtest
@@ -190,15 +200,17 @@ sudo evtest
 
 ---
 
-## Как работает внутри
+## Как это работает
 
-Программа использует два механизма Linux:
+* **evdev** — чтение событий с `/dev/input/eventX`
+* **uinput** — создание виртуального устройства
+* **epoll** — эффективное ожидание событий
+* **inotify** — отслеживание новых устройств
 
-- **evdev** (`/dev/input/eventX`) — чтение сырых событий с физической клавиатуры. После `EVIOCGRAB` устройство полностью захватывается — события больше не попадают в систему напрямую.
-- **uinput** (`/dev/uinput`) — создание виртуального устройства, через которое отправляются преобразованные события.
-- **epoll** — эффективное ожидание событий без busy loop. CPU в простое ~0%.
-- **inotify** — отслеживание появления новых устройств в `/dev/input` без polling.
+CPU в простое ≈ 0%.
 
 ---
 
-**Вдохновлено (EPKL)[https://github.com/DreymaR/BigBagKbdTrixPKL]**
+## Вдохновение
+
+https://github.com/DreymaR/BigBagKbdTrixPKL

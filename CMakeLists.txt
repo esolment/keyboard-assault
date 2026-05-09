@@ -1,5 +1,8 @@
 cmake_minimum_required(VERSION 4.2)
+project(keyboard_assault VERSION 1.1 LANGUAGES CXX)
 
-project(keyboard_assault VERSION 1.0 LANGUAGES CXX)
-
-add_executable(keyboard_assault main.cpp)
+if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
+    add_subdirectory(windows)
+else()
+    add_subdirectory(linux)
+endif()

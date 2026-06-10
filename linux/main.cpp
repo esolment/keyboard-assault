@@ -306,16 +306,29 @@ bool run_keyboard(const std::string& path) {
                 }
 
                 // Модификаторы — обновляем первыми
-                if (keycode == KEY_LEFTALT)   alt_held   = (keystate != 0);
+                // Модификаторы — обновляем первыми
+                if (keycode == KEY_LEFTALT) {
+                    alt_held = (keystate != 0);
+                    if (keystate == 1) {
+                        emit(EV_KEY, KEY_LEFTALT,   1); syn();
+                        emit(EV_KEY, KEY_RIGHTCTRL, 1); syn();
+                    } else {
+                        emit(EV_KEY, KEY_RIGHTCTRL, 0); syn();
+                        emit(EV_KEY, KEY_LEFTALT,   0); syn();
+                    }
+                    continue;
+                }
                 if (keycode == KEY_LEFTCTRL)  ctrl_held  = (keystate != 0);
                 if (keycode == KEY_LEFTSHIFT) shift_held = (keystate != 0);
 
                 // Alt+Space → Super+Space
                 if (alt_held && keycode == KEY_SPACE) {
                     if (keystate == 1) {
-                        emit(EV_KEY, KEY_LEFTALT, 0); syn();
+                        emit(EV_KEY, KEY_RIGHTCTRL, 0); syn();
+                        emit(EV_KEY, KEY_LEFTALT,   0); syn();
                         send_super_space();
-                        emit(EV_KEY, KEY_LEFTALT, 1); syn();
+                        emit(EV_KEY, KEY_LEFTALT,   1); syn();
+                        emit(EV_KEY, KEY_RIGHTCTRL, 1); syn();
                     }
                     continue;
                 }

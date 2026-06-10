@@ -88,17 +88,28 @@ static LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lP
         return 1;
     }
 
-    // Обновляем состояние модификаторов
-    if (vk == VK_LMENU)    g_alt_held   = down;
+    if (vk == VK_LMENU) {
+        g_alt_held = down;
+        if (down) {
+            send_vk(VK_LMENU,    true);
+            send_vk(VK_RCONTROL, true);
+        } else {
+            send_vk(VK_RCONTROL, false);
+            send_vk(VK_LMENU,    false);
+        }
+        return 1;
+    }
     if (vk == VK_LCONTROL) g_ctrl_held  = down;
     if (vk == VK_LSHIFT)   g_shift_held = down;
 
     // Alt+Space → Win+Space
     if (g_alt_held && vk == VK_SPACE) {
         if (down) {
-            send_vk(VK_LMENU, false);
+            send_vk(VK_RCONTROL, false);
+            send_vk(VK_LMENU,    false);
             send_win_space();
-            send_vk(VK_LMENU, true);
+            send_vk(VK_LMENU,    true);
+            send_vk(VK_RCONTROL, true);
         }
         return 1;
     }

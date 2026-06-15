@@ -278,11 +278,12 @@ bool run_keyboard(const std::string& path) {
     ev.data.fd = dev_fd;
     epoll_ctl(ep, EPOLL_CTL_ADD, dev_fd, &ev);
 
-    bool caps_held      = false;
-    bool alt_held       = false;
-    bool ctrl_held      = false;
-    bool shift_held     = false;
-    bool backspace_held = false;
+    bool caps_held           = false;
+    bool alt_held            = false;
+    bool ctrl_held           = false;
+    bool shift_held          = false;
+    bool backspace_held      = false;
+    bool backspace_as_delete = false;
     long last_delete_us = 0;
     std::set<int> consumed_while_caps;
 
@@ -353,9 +354,15 @@ bool run_keyboard(const std::string& path) {
                 }
 
                 // Shift+Backspace → Delete
-                if (shift_held && keycode == KEY_BACKSPACE) {
-                    emit(EV_KEY, KEY_LEFTSHIFT, 0); syn();
-                    send_key(KEY_DELETE, keystate);
+                if (keycode == KEY_BACKSPACE && (shift_held || backspace_as_delete)) {
+                    if (keystate == 1 && shift_held) {
+                        backspace_as_delete = true;
+                        emit(EV_KEY, KEY_LEFTSHIFT, 0); syn();
+                        send_key(KEY_DELETE, 1);
+                    } else if (keystate == 0 && backspace_as_delete) {
+                        backspace_as_delete = false;
+                        send_key(KEY_DELETE, 0);
+                    }
                     continue;
                 }
 

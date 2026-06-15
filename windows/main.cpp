@@ -85,6 +85,14 @@ static LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lP
     // CapsLock — только отслеживаем, не пропускаем в систему
     if (vk == VK_CAPITAL) {
         g_caps_held = down;
+        if (!down) {
+            for (DWORD k : g_consumed_while_caps) {
+                auto it = NAV_MAP.find(k);
+                if (it != NAV_MAP.end())
+                    send_vk(it->second, false);
+            }
+            g_consumed_while_caps.clear();
+        }
         return 1;
     }
 
@@ -174,6 +182,9 @@ static LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lP
     // Key-up клавиш, съеденных в режиме Caps
     if (!down && g_consumed_while_caps.count(vk)) {
         g_consumed_while_caps.erase(vk);
+        auto it = NAV_MAP.find(vk);
+        if (it != NAV_MAP.end())
+            send_vk(it->second, false);
         return 1;
     }
 

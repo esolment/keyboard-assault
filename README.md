@@ -60,7 +60,7 @@ cmake --build build
 Бинарник:
 
 ```
-./build/keyboard_assault
+./build/linux/keyboard_assault
 ```
 
 ### Установка как сервис (systemd)
@@ -68,7 +68,7 @@ cmake --build build
 **1. Установка бинарника:**
 
 ```bash
-sudo cp build/keyboard_assault /usr/local/bin/keyboard-assault
+sudo cp build/linux/keyboard_assault /usr/local/bin/keyboard-assault
 sudo chmod +x /usr/local/bin/keyboard-assault
 ```
 
@@ -124,7 +124,7 @@ sudo usermod -aG input $USER
 
 ```bash
 cmake --build build
-sudo cp build/keyboard_assault /usr/local/bin/keyboard-assault
+sudo cp build/linux/keyboard_assault /usr/local/bin/keyboard-assault
 sudo systemctl restart keyboard-assault
 ```
 
@@ -191,7 +191,7 @@ cmake --build build-win
 Бинарник:
 
 ```
-./build-win/keyboard_assault.exe
+./build-win/windows/keyboard_assault.exe
 ```
 
 ### Сборка на Windows

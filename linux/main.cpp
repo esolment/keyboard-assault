@@ -79,6 +79,15 @@ long now_us() {
     return tv.tv_sec * 1000000L + tv.tv_usec;
 }
 
+// FIX 1: сбрасываем все клавиши именно на виртуальном устройстве (uinput),
+// чтобы при дисконнекте физической клавиатуры не залипали обычные буквы.
+void release_all_virtual_keys() {
+    for (int i = 0; i < KEY_MAX; i++) {
+        emit(EV_KEY, i, 0);
+    }
+    syn();
+}
+
 bool is_keyboard(int fd) {
     unsigned char evbit[EV_MAX / 8 + 1]   = {};
     unsigned char keybit[KEY_MAX / 8 + 1] = {};
@@ -225,7 +234,6 @@ std::string detect_keyboard() {
         }
     }
 
-    // Ждём key-up последней клавиши последовательности
     if (found_last_keycode != -1) {
         bool got_keyup = false;
         while (!got_keyup) {
@@ -302,11 +310,22 @@ bool run_keyboard(const std::string& path) {
                 // Caps Lock
                 if (keycode == KEY_CAPSLOCK) {
                     caps_held = (keystate != 0);
+                    // FIX 2: при отпускании Caps форсированно отпускаем все
+                    // навигационные клавиши, которые были нажаты под Caps.
+                    // Без этого, если отпустить Caps раньше буквы, key-up
+                    // навигационной клавиши никогда не отправится.
+                    if (keystate == 0) {
+                        for (int k : consumed_while_caps) {
+                            auto it = NAV_MAP.find(k);
+                            if (it != NAV_MAP.end())
+                                send_key(it->second, 0);
+                        }
+                        consumed_while_caps.clear();
+                    }
                     continue;
                 }
 
-                // Модификаторы — обновляем первыми
-                // Модификаторы — обновляем первыми
+                // Модификаторы
                 if (keycode == KEY_LEFTALT) {
                     alt_held = (keystate != 0);
                     if (keystate == 1) {
@@ -383,7 +402,11 @@ bool run_keyboard(const std::string& path) {
                 if (keycode == KEY_BACKSPACE)
                     backspace_held = (keystate != 0);
 
-                if (caps_held && backspace_held) {
+                // FIX 3: добавили "&& keycode == KEY_BACKSPACE".
+                // В оригинале условие caps_held && backspace_held срабатывало
+                // для ЛЮБОЙ клавиши пока зажат Caps+Backspace, поглощая
+                // key-down и key-up обычных букв без их отправки.
+                if (caps_held && backspace_held && keycode == KEY_BACKSPACE) {
                     long now = now_us();
                     if (now - last_delete_us > DELETE_REPEAT_DELAY_US) {
                         send_ctrl_backspace();
@@ -397,13 +420,22 @@ bool run_keyboard(const std::string& path) {
                     auto it = NAV_MAP.find(keycode);
                     if (it != NAV_MAP.end()) {
                         send_key(it->second, keystate);
-                        consumed_while_caps.insert(keycode);
+                        if (keystate != 0)
+                            consumed_while_caps.insert(keycode);
+                        else
+                            consumed_while_caps.erase(keycode);
                         continue;
                     }
                 }
 
+                // FIX 2 (продолжение): при key-up навигационной клавиши
+                // отправляем key-up замаппленной клавиши.
+                // Срабатывает когда Caps уже отпущен, но клавиша ещё нет.
                 if (consumed_while_caps.count(keycode) && keystate == 0) {
                     consumed_while_caps.erase(keycode);
+                    auto it = NAV_MAP.find(keycode);
+                    if (it != NAV_MAP.end())
+                        send_key(it->second, 0);
                     continue;
                 }
 
@@ -417,6 +449,10 @@ bool run_keyboard(const std::string& path) {
             }
         }
     }
+
+    // FIX 1: сбрасываем виртуальное устройство при любом дисконнекте,
+    // иначе последняя нажатая клавиша залипает до следующего нажатия.
+    release_all_virtual_keys();
 
     ioctl(dev_fd, EVIOCGRAB, 0);
     close(dev_fd);

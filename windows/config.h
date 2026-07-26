@@ -4,6 +4,7 @@
 #include <set>
 #include <fstream>
 #include <cstdlib>
+#include <cstdint>
 
 struct Config {
     std::string secret_sequence = "1234";
@@ -21,7 +22,7 @@ inline std::string trim(const std::string& s) {
 inline std::string config_path() {
     char buf[MAX_PATH];
     DWORD n = GetModuleFileNameA(nullptr, buf, MAX_PATH);
-    std::string exe = (n > 0) ? std::string(buf, n) : "keyboard_assault.exe";
+    std::string exe = (n > 0) ? std::string(buf, n) : "keyboard_remap.exe";
     size_t slash = exe.find_last_of("\\/");
     std::string dir = (slash == std::string::npos) ? "." : exe.substr(0, slash);
     return dir + "\\config.ini";

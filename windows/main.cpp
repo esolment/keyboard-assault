@@ -11,14 +11,12 @@
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
-#include <hidsdi.h>
 #include <map>
 #include <set>
 #include <string>
+#include <cstdint>
 
 #include "config.h"
-
-#pragma comment(lib, "hid.lib")
 
 // ─── Настройки ────────────────────────────────────────────────────────────
 static const DWORD DELETE_REPEAT_MS = 150;

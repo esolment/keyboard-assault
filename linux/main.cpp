@@ -16,8 +16,9 @@
 #include <string>
 #include <algorithm>
 
+#include "config.h"
+
 #define INPUT_DIR "/dev/input"
-#define SECRET_SEQUENCE "1234"
 #define DELETE_REPEAT_DELAY_US 150000
 
 const std::map<int, int> NAV_MAP = {
@@ -41,6 +42,7 @@ const std::map<int, char> KEY_CHAR = {
 };
 
 int ui_fd = -1;
+Config g_cfg;
 
 void emit(int type, int code, int value) {
     struct input_event ev{};
@@ -79,7 +81,7 @@ long now_us() {
     return tv.tv_sec * 1000000L + tv.tv_usec;
 }
 
-// FIX 1: сбрасываем все клавиши именно на виртуальном устройстве (uinput),
+// Сбрасываем все клавиши именно на виртуальном устройстве (uinput),
 // чтобы при дисконнекте физической клавиатуры не залипали обычные буквы.
 void release_all_virtual_keys() {
     for (int i = 0; i < KEY_MAX; i++) {
@@ -96,6 +98,13 @@ bool is_keyboard(int fd) {
     bool has_ev_key = evbit[EV_KEY / 8] & (1 << (EV_KEY % 8));
     bool has_key_a  = keybit[KEY_A / 8]  & (1 << (KEY_A  % 8));
     return has_ev_key && has_key_a;
+}
+
+// Возвращает vendor<<16 | product для устройства, либо 0 при ошибке.
+uint32_t get_device_id(int fd) {
+    struct input_id id{};
+    if (ioctl(fd, EVIOCGID, &id) < 0) return 0;
+    return (static_cast<uint32_t>(id.vendor) << 16) | (static_cast<uint32_t>(id.product) & 0xFFFF);
 }
 
 std::vector<std::string> get_event_devices() {
@@ -144,6 +153,8 @@ void release_all_keys(int dev_fd) {
     }
 }
 
+// Ждёт ввода секретной последовательности на любой клавиатуре и
+// возвращает путь к устройству, на котором она была введена.
 std::string detect_keyboard() {
     struct DevState {
         std::string path;
@@ -184,7 +195,7 @@ std::string detect_keyboard() {
     int ep = make_epoll();
     std::string found;
     int found_last_keycode = -1;
-    const std::string seq = SECRET_SEQUENCE;
+    const std::string& seq = g_cfg.secret_sequence;
     struct epoll_event events[32];
     struct input_event ie;
 
@@ -272,6 +283,13 @@ bool run_keyboard(const std::string& path) {
     char name[256] = {};
     ioctl(dev_fd, EVIOCGNAME(sizeof(name)), name);
 
+    uint32_t dev_id = get_device_id(dev_fd);
+    bool full_layout = g_cfg.full_layout_devices.count(dev_id) > 0;
+
+    fprintf(stderr, "keyboard-assault: устройство '%s' (id=%04x:%04x) — режим: %s\n",
+            name, (dev_id >> 16) & 0xFFFF, dev_id & 0xFFFF,
+            full_layout ? "полный (split)" : "базовый");
+
     int ep = epoll_create1(0);
     struct epoll_event ev{};
     ev.events  = EPOLLIN;
@@ -308,13 +326,9 @@ bool run_keyboard(const std::string& path) {
                 int keycode  = ie.code;
                 int keystate = ie.value;
 
-                // Caps Lock
+                // Caps Lock — используется только как модификатор
                 if (keycode == KEY_CAPSLOCK) {
                     caps_held = (keystate != 0);
-                    // FIX 2: при отпускании Caps форсированно отпускаем все
-                    // навигационные клавиши, которые были нажаты под Caps.
-                    // Без этого, если отпустить Caps раньше буквы, key-up
-                    // навигационной клавиши никогда не отправится.
                     if (keystate == 0) {
                         for (int k : consumed_while_caps) {
                             auto it = NAV_MAP.find(k);
@@ -326,34 +340,79 @@ bool run_keyboard(const std::string& path) {
                     continue;
                 }
 
-                // Модификаторы
-                if (keycode == KEY_LEFTALT) {
-                    alt_held = (keystate != 0);
-                    if (keystate == 1) {
-                        emit(EV_KEY, KEY_LEFTALT,   1); syn();
-                        emit(EV_KEY, KEY_RIGHTCTRL, 1); syn();
-                    } else {
-                        emit(EV_KEY, KEY_RIGHTCTRL, 0); syn();
-                        emit(EV_KEY, KEY_LEFTALT,   0); syn();
-                    }
-                    continue;
-                }
                 if (keycode == KEY_LEFTCTRL)  ctrl_held  = (keystate != 0);
                 if (keycode == KEY_LEFTSHIFT) shift_held = (keystate != 0);
 
-                // Alt+Space → Super+Space
-                if (alt_held && keycode == KEY_SPACE) {
-                    if (keystate == 1) {
-                        emit(EV_KEY, KEY_RIGHTCTRL, 0); syn();
-                        emit(EV_KEY, KEY_LEFTALT,   0); syn();
-                        send_super_space();
-                        emit(EV_KEY, KEY_LEFTALT,   1); syn();
-                        emit(EV_KEY, KEY_RIGHTCTRL, 1); syn();
-                    }
-                    continue;
-                }
+                // ─── Функции, доступные только для устройств из
+                // full_layout_devices (обычно — сплит-клавиатуры) ───
+                if (full_layout) {
 
-                // Shift+Backspace → Delete
+                    if (keycode == KEY_LEFTALT) {
+                        alt_held = (keystate != 0);
+                        if (keystate == 1) {
+                            emit(EV_KEY, KEY_LEFTALT,   1); syn();
+                            emit(EV_KEY, KEY_RIGHTCTRL, 1); syn();
+                        } else {
+                            emit(EV_KEY, KEY_RIGHTCTRL, 0); syn();
+                            emit(EV_KEY, KEY_LEFTALT,   0); syn();
+                        }
+                        continue;
+                    }
+
+                    // Alt+Space → Super+Space
+                    if (alt_held && keycode == KEY_SPACE) {
+                        if (keystate == 1) {
+                            emit(EV_KEY, KEY_RIGHTCTRL, 0); syn();
+                            emit(EV_KEY, KEY_LEFTALT,   0); syn();
+                            send_super_space();
+                            emit(EV_KEY, KEY_LEFTALT,   1); syn();
+                            emit(EV_KEY, KEY_RIGHTCTRL, 1); syn();
+                        }
+                        continue;
+                    }
+
+                    // Ctrl+F1 → Mute
+                    if (ctrl_held && keycode == KEY_F1) {
+                        emit(EV_KEY, KEY_LEFTCTRL, 0); syn();
+                        send_key(KEY_MUTE, keystate);
+                        continue;
+                    }
+
+                    // Ctrl+F2 → Volume Down
+                    if (ctrl_held && keycode == KEY_F2) {
+                        emit(EV_KEY, KEY_LEFTCTRL, 0); syn();
+                        send_key(KEY_VOLUMEDOWN, keystate);
+                        continue;
+                    }
+
+                    // Ctrl+F3 → Volume Up
+                    if (ctrl_held && keycode == KEY_F3) {
+                        emit(EV_KEY, KEY_LEFTCTRL, 0); syn();
+                        send_key(KEY_VOLUMEUP, keystate);
+                        continue;
+                    }
+
+                    // RightShift → /
+                    if (keycode == KEY_RIGHTSHIFT) {
+                        send_key(KEY_SLASH, keystate);
+                        continue;
+                    }
+
+                    // KEY_UP → RightShift (без Caps)
+                    if (keycode == KEY_UP && !caps_held) {
+                        send_key(KEY_RIGHTSHIFT, keystate);
+                        continue;
+                    }
+
+                    // / → KEY_UP
+                    if (keycode == KEY_SLASH) {
+                        send_key(KEY_UP, keystate);
+                        continue;
+                    }
+                }
+                // ─── конец full_layout-функций ───
+
+                // Shift+Backspace → Delete (базовая функция, всегда доступна)
                 if (keycode == KEY_BACKSPACE && (shift_held || backspace_as_delete)) {
                     if (keystate == 1 && shift_held) {
                         backspace_as_delete = true;
@@ -366,53 +425,10 @@ bool run_keyboard(const std::string& path) {
                     continue;
                 }
 
-                // Ctrl+F1 → Mute
-                if (ctrl_held && keycode == KEY_F1) {
-                    emit(EV_KEY, KEY_LEFTCTRL, 0); syn();
-                    send_key(KEY_MUTE, keystate);
-                    continue;
-                }
-
-                // Ctrl+F2 → Volume Down
-                if (ctrl_held && keycode == KEY_F2) {
-                    emit(EV_KEY, KEY_LEFTCTRL, 0); syn();
-                    send_key(KEY_VOLUMEDOWN, keystate);
-                    continue;
-                }
-
-                // Ctrl+F3 → Volume Up
-                if (ctrl_held && keycode == KEY_F3) {
-                    emit(EV_KEY, KEY_LEFTCTRL, 0); syn();
-                    send_key(KEY_VOLUMEUP, keystate);
-                    continue;
-                }
-
-                // RightShift → /
-                if (keycode == KEY_RIGHTSHIFT) {
-                    send_key(KEY_SLASH, keystate);
-                    continue;
-                }
-
-                // KEY_UP → RightShift (без Caps)
-                if (keycode == KEY_UP && !caps_held) {
-                    send_key(KEY_RIGHTSHIFT, keystate);
-                    continue;
-                }
-
-                // / → KEY_UP
-                if (keycode == KEY_SLASH) {
-                    send_key(KEY_UP, keystate);
-                    continue;
-                }
-
                 // Caps+Backspace → удаление слова
                 if (keycode == KEY_BACKSPACE)
                     backspace_held = (keystate != 0);
 
-                // FIX 3: добавили "&& keycode == KEY_BACKSPACE".
-                // В оригинале условие caps_held && backspace_held срабатывало
-                // для ЛЮБОЙ клавиши пока зажат Caps+Backspace, поглощая
-                // key-down и key-up обычных букв без их отправки.
                 if (caps_held && backspace_held && keycode == KEY_BACKSPACE) {
                     long now = now_us();
                     if (now - last_delete_us > DELETE_REPEAT_DELAY_US) {
@@ -435,9 +451,8 @@ bool run_keyboard(const std::string& path) {
                     }
                 }
 
-                // FIX 2 (продолжение): при key-up навигационной клавиши
-                // отправляем key-up замаппленной клавиши.
-                // Срабатывает когда Caps уже отпущен, но клавиша ещё нет.
+                // При key-up навигационной клавиши отправляем key-up
+                // замаппленной клавиши, если Caps уже отпущен раньше неё.
                 if (consumed_while_caps.count(keycode) && keystate == 0) {
                     consumed_while_caps.erase(keycode);
                     auto it = NAV_MAP.find(keycode);
@@ -457,8 +472,8 @@ bool run_keyboard(const std::string& path) {
         }
     }
 
-    // FIX 1: сбрасываем виртуальное устройство при любом дисконнекте,
-    // иначе последняя нажатая клавиша залипает до следующего нажатия.
+    // Сбрасываем виртуальное устройство при любом дисконнекте, иначе
+    // последняя нажатая клавиша залипает до следующего нажатия.
     release_all_virtual_keys();
 
     ioctl(dev_fd, EVIOCGRAB, 0);
@@ -468,6 +483,8 @@ bool run_keyboard(const std::string& path) {
 }
 
 int main() {
+    g_cfg = load_config();
+
     ui_fd = setup_uinput();
     if (ui_fd < 0) return 1;
 

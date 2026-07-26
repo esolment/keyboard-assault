@@ -1,2 +1,2 @@
-add_executable(keyboard_assault main.cpp)
+add_executable(keyboard_assault main.cpp config.h)
 target_compile_features(keyboard_assault PRIVATE cxx_std_17)

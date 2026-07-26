@@ -2,9 +2,13 @@
 
 Низкоуровневый ремаппер клавиатуры для Linux и Windows. На Linux работает через `/dev/input` и `uinput`, перехватывает события на уровне ядра — функционирует в любом окружении (X11, Wayland, TTY). На Windows использует Low-Level Keyboard Hook.
 
+Набор активных функций зависит от конкретного устройства: базовый remap работает на любой клавиатуре, а расширенный набор (заточенный под сплит-клавиатуры с нестандартным расположением клавиш) включается только для устройств, явно перечисленных в конфиге.
+
 ---
 
 ## Возможности
+
+### Базовые (работают на любой клавиатуре)
 
 | Сочетание           | Действие                             |
 | ------------------- | ------------------------------------ |
@@ -13,32 +17,79 @@
 | `Caps + O`          | End                                  |
 | `Caps + Backspace`  | Удалить слово назад (Ctrl+Backspace) |
 | `Shift + Backspace` | Delete                               |
-| `Ctrl + F1`         | Mute / Unmute                        |
-| `Ctrl + F2`         | Громкость —                          |
-| `Ctrl + F3`         | Громкость +                          |
-| `Alt + Space`       | Super+Space / Win+Space              |
-| `RightShift`        | / ?                                  |
-| `физический /`      | ↑                                    |
 
 Caps Lock используется исключительно как модификатор и не переключает регистр.
 
+### Расширенные (только для устройств из `full_layout_devices`)
+
+| Сочетание      | Действие                 |
+| -------------- | ------------------------ |
+| `Ctrl + F1`    | Mute / Unmute             |
+| `Ctrl + F2`    | Громкость —               |
+| `Ctrl + F3`    | Громкость +               |
+| `Alt + Space`  | Super+Space / Win+Space   |
+| `RightShift`   | / ?                       |
+| физический `/` | ↑                         |
+
+Эти сочетания рассчитаны на сплит-клавиатуру, где соответствующие клавиши находятся в неудобных местах. На обычной клавиатуре они не нужны и мешают — поэтому включаются автоматически только для устройств, ID которых указан в конфиге, и не затрагивают остальные клавиатуры.
+
 ---
 
-## Linux
+## Конфиг
 
-### Привязка клавиатуры
+Секретная последовательность и список устройств хранятся в `config.ini`.
 
-Программа не использует фиксированный путь к устройству.
+**Linux:** `~/.config/keyboard-assault/config.ini` (или `$XDG_CONFIG_HOME/keyboard-assault/config.ini`)
+**Windows:** `config.ini` рядом с `keyboard_assault.exe`
+
+```ini
+# Последовательность символов (a-z, 0-9) для привязки к устройству
+secret_sequence=1234
+
+# Устройства (vendor:product, hex), для которых включён полный набор функций
+[full_layout_devices]
+046d:c52b
+1234:5678
+```
+
+Если файла нет, используются значения по умолчанию: `secret_sequence=1234` и пустой список устройств (то есть везде работает только базовый remap).
+
+### Как узнать vendor:product своей клавиатуры
+
+**Linux:**
+
+```bash
+cat /proc/bus/input/devices | grep -A5 -B2 "Vendor"
+```
+
+Формат вывода: `Vendor=046d Product=c52b` — это и есть нужные значения.
+
+**Windows:**
+
+Диспетчер устройств → Клавиатуры → нужное устройство → Свойства → Сведения → «ИД оборудования». Там будет строка вида `HID\VID_046D&PID_C52B...` — берите `VID_` и `PID_` в hex.
+
+Добавьте пару в секцию `[full_layout_devices]` конфига в формате `vendor:product` (без `VID_`/`PID_`/`0x`, только hex-цифры, регистр не важен).
+
+---
+
+## Привязка клавиатуры к устройству (Linux)
+
+Программа не использует фиксированный путь к устройству и не требует указывать `eventX` в конфиге — она определяет, к какой клавиатуре привязаться, по вводу секретной последовательности, а полный или базовый набор функций выбирается автоматически по vendor:product ID устройства.
 
 **Как это работает:**
 
 1. Слушает все устройства в `/dev/input`
 2. Ожидает ввод секретной последовательности (по умолчанию `1234`)
 3. Привязывается к устройству, на котором она введена
-4. При отключении устройства — возвращается в режим ожидания
-5. Новые устройства отслеживаются через `inotify`
+4. Определяет vendor:product ID устройства и включает полный или базовый набор функций согласно конфигу
+5. При отключении устройства — возвращается в режим ожидания
+6. Новые устройства отслеживаются через `inotify`
 
-Ввод последовательности не требует фокуса окна.
+Ввод последовательности не требует фокуса окна. Привязка идёт не по имени файла устройства (`eventX` может меняться между переподключениями), а по vendor:product ID, который остаётся постоянным.
+
+---
+
+## Linux
 
 ### Зависимости
 
@@ -63,19 +114,25 @@ cmake --build build
 ./build/linux/keyboard_assault
 ```
 
-### Установка как сервис (systemd)
+### Установка как сервис (systemd, user-сервис)
 
-**1. Установка бинарника:**
+**1. Установка бинарника и конфига:**
 
 ```bash
 sudo cp build/linux/keyboard_assault /usr/local/bin/keyboard-assault
 sudo chmod +x /usr/local/bin/keyboard-assault
+
+mkdir -p ~/.config/keyboard-assault
+cp config.example.ini ~/.config/keyboard-assault/config.ini
 ```
+
+Отредактируйте `~/.config/keyboard-assault/config.ini` под свои устройства.
 
 **2. Создание сервиса:**
 
 ```bash
-sudo nano /etc/systemd/system/keyboard-assault.service
+mkdir -p ~/.config/systemd/user
+nano ~/.config/systemd/user/keyboard-assault.service
 ```
 
 ```ini
@@ -91,23 +148,22 @@ Restart=always
 RestartSec=3
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=default.target
 ```
 
 **3. Запуск:**
 
 ```bash
-sudo systemctl daemon-reload
-sudo systemctl enable keyboard-assault
-sudo systemctl start keyboard-assault
+systemctl --user daemon-reload
+systemctl --user enable --now keyboard-assault
 ```
 
 **4. Управление:**
 
 ```bash
-sudo systemctl stop keyboard-assault
-sudo systemctl restart keyboard-assault
-sudo journalctl -u keyboard-assault -f
+systemctl --user stop keyboard-assault
+systemctl --user restart keyboard-assault
+journalctl --user -u keyboard-assault -f
 ```
 
 ### Устранение неполадок
@@ -125,7 +181,7 @@ sudo usermod -aG input $USER
 ```bash
 cmake --build build
 sudo cp build/linux/keyboard_assault /usr/local/bin/keyboard-assault
-sudo systemctl restart keyboard-assault
+systemctl --user restart keyboard-assault
 ```
 
 **Проверка устройств:**
@@ -146,6 +202,7 @@ sudo evtest
 - **uinput** — создание виртуального устройства
 - **epoll** — эффективное ожидание событий
 - **inotify** — отслеживание новых устройств
+- **EVIOCGID** — получение vendor:product ID устройства для выбора набора функций
 
 CPU в простое ≈ 0%.
 
@@ -153,7 +210,7 @@ CPU в простое ≈ 0%.
 
 ## Windows
 
-Работает для всех подключённых клавиатур.
+Работает для всех подключённых клавиатур. Raw Input используется для определения vendor:product ID устройства, с которого пришло нажатие (сам `WH_KEYBOARD_LL` этой информации не предоставляет) — набор функций выбирается по этому ID согласно конфигу, как и на Linux.
 
 ### Права администратора
 
@@ -203,7 +260,7 @@ cmake --build build
 
 ### Запуск
 
-Просто запустить `keyboard_assault.exe` — окна не появится, программа работает в фоне. Для остановки — завершить процесс через Диспетчер задач.
+Положите `config.ini` рядом с `keyboard_assault.exe` (см. `config.example.ini`), затем запустите `keyboard_assault.exe` — окна не появится, программа работает в фоне. Для остановки — завершить процесс через Диспетчер задач.
 
 ### Автозапуск при входе в систему
 
@@ -224,15 +281,16 @@ Win+R → shell:startup → скопировать ярлык на keyboard_assa
 ### Как это работает
 
 - **WH_KEYBOARD_LL** — системный хук, перехватывает нажатия со всех клавиатур до того, как они достигают приложений
+- **Raw Input (`WM_INPUT`)** — определение vendor:product ID устройства, с которого пришло нажатие
 - **SendInput** — генерация виртуальных нажатий взамен перехваченных
 
 ---
 
 ## Настройка
 
-Откройте `main.cpp` нужной платформы и измените параметры в начале файла.
+Секретная последовательность и список устройств задаются в `config.ini` (см. раздел «Конфиг» выше). Изменения в `config.ini` применяются со следующего запуска программы — после правки перезапустите процесс или сервис.
 
-**Задержка повтора удаления слова:**
+Навигационная таблица (`NAV_MAP`: Caps+I/J/K/L/U/O) и задержка повтора удаления слова задаются в исходном коде:
 
 ```cpp
 // Linux
@@ -240,36 +298,6 @@ Win+R → shell:startup → скопировать ярлык на keyboard_assa
 
 // Windows
 static const DWORD DELETE_REPEAT_MS = 150;
-```
-
-**Секретная последовательность (только Linux):**
-
-```cpp
-#define SECRET_SEQUENCE "1234"
-```
-
-**Навигационные сочетания:**
-
-```cpp
-// Linux
-const std::map<int, int> NAV_MAP = {
-    {KEY_I, KEY_UP},
-    {KEY_J, KEY_LEFT},
-    {KEY_K, KEY_DOWN},
-    {KEY_L, KEY_RIGHT},
-    {KEY_U, KEY_HOME},
-    {KEY_O, KEY_END},
-};
-
-// Windows
-static const std::map<DWORD, DWORD> NAV_MAP = {
-    {'I', VK_UP},
-    {'J', VK_LEFT},
-    {'K', VK_DOWN},
-    {'L', VK_RIGHT},
-    {'U', VK_HOME},
-    {'O', VK_END},
-};
 ```
 
 После изменений пересоберите проект:
